@@ -22,8 +22,16 @@ ANS_PATH = 'answers.pickle'
 
 import os
 
+import nltk
+try:
+    nltk.data.find('tokenizers/punkt_tab')
+except LookupError:
+    nltk.download('punkt_tab')
+
 from nltk.tokenize import sent_tokenize
 from guesser import print_guess, Guesser
+
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 kTFIDF_TEST_QUESTIONS = {"This capital of England": ['Maine', 'Boston'],
                         "The author of Pride and Prejudice": ['Jane_Austen', 'Jane_Austen'],
@@ -48,7 +56,22 @@ class TfidfGuesser(Guesser):
     """
     Class that, given a query, finds the most similar question to it.
     """
-    def __init__(self, filename:str, min_df:int=10, max_df:float=0.4):
+    #def __init__(self, filename:str, min_df:int=10, max_df:float=0.4):
+    def __init__(self, filename: str, min_df: int = 4, max_df: float = 0.87,
+                 ngram_range: tuple = (1, 2), max_features: int = 50000,
+                 use_idf: bool = True, sublinear_tf: bool = True,
+                 norm: str = 'l2', use_custom_tokenizer: bool = False):
+        """
+           filename: filename
+           min_df: minimum document frequency
+           max_df: maximum document frequency
+           ngram_range: tuple of (min_n, max_n) for n-grams 
+           max_features: limit vocabulary size for efficiency
+           use_idf: inverse document frequency weighting
+           sublinear_tf: log scaling for term frequency
+           norm: normalization method ('l1', 'l2', or None)
+           use_custom_tokenizer: enhanced tokenizer with better preprocessing
+        """
         """
         Initializes data structures that will be useful later.
 
@@ -59,11 +82,66 @@ class TfidfGuesser(Guesser):
         """
 
         # You'll need add the vectorizer here and replace this fake vectorizer
-        self.tfidf_vectorizer = DummyVectorizer()
+        #self.tfidf_vectorizer = DummyVectorizer()
+        #self.tfidf = None 
+        #self.questions = None
+        #self.answers = None
+        #self.filename = filename
+        def custom_tokenizer(text):
+            """
+            - contractions
+            - important punctuation patterns
+            - numbers and special terms
+            """
+    
+            import re
+            # Preserve year patterns
+            text = re.sub(r'\b(\d{4})\b', r'year_\1', text)
+            # Preserve important entities (capitalized words often = proper nouns)
+            # Convert to lowercase but track if originally capitalized
+            tokens = text.split()
+            processed = []
+            for token in tokens:
+                # Remove pure punctuation
+                token = re.sub(r'^[^\w\s]+|[^\w\s]+$', '', token)
+                if token:
+                    processed.append(token.lower())
+            return processed
+        
+        # Build vectorizer with optimized parameters
+        vectorizer_params = {
+            'min_df': min_df,
+            'max_df': max_df,
+            'lowercase': True,
+            'stop_words': 'english',
+            'ngram_range': ngram_range,
+            'max_features': max_features,
+            'use_idf': use_idf,
+            'sublinear_tf': sublinear_tf,
+            'norm': norm,
+            'strip_accents': 'unicode',
+            'analyzer': 'word',
+        }
+        
+        if use_custom_tokenizer:
+            vectorizer_params['tokenizer'] = custom_tokenizer
+        
+        self.tfidf_vectorizer = TfidfVectorizer(**vectorizer_params)
         self.tfidf = None 
         self.questions = None
         self.answers = None
         self.filename = filename
+        
+        # Store configuration for later reference
+        self.config = {
+            'min_df': min_df,
+            'max_df': max_df,
+            'ngram_range': ngram_range,
+            'max_features': max_features,
+            'use_idf': use_idf,
+            'sublinear_tf': sublinear_tf,
+            'norm': norm,
+        }
 
     def train(self, training_data, answer_field='page', split_by_sentence=True,
                     min_length=-1, max_length=-1, remove_missing_pages=True):
@@ -79,7 +157,14 @@ class TfidfGuesser(Guesser):
                       max_length, remove_missing_pages)
 
         self.tfidf = self.tfidf_vectorizer.transform(self.questions)
-        logging.info("Creating tf-idf dataframe with %i" % len(self.questions))
+        
+        #logging.info("Creating tf-idf dataframe with %i" % len(self.questions))
+                      
+        vocab_size = len(self.tfidf_vectorizer.vocabulary_)
+        logging.info("Created TF-IDF matrix with %i documents" % len(self.questions))
+        logging.info("Vocabulary size: %i features" % vocab_size)
+        logging.info("Matrix shape: %s" % str(self.tfidf.shape))
+        logging.info("Matrix sparsity: %.2f%%" % (100.0 * (1 - self.tfidf.nnz / (self.tfidf.shape[0] * self.tfidf.shape[1]))))
         
     def save(self):
         """
@@ -110,15 +195,38 @@ class TfidfGuesser(Guesser):
         question_tfidf = self.tfidf_vectorizer.transform([question])
         cosine_similarities = cosine_similarity(question_tfidf, self.tfidf)
         cos = cosine_similarities[0]
+
+        query_words = set(question.lower().split())
+        for i, train_q in enumerate(self.questions):
+            # Only boost documents that already have some similarity
+            if cos[i] > 0.05:  # Threshold to avoid boosting irrelevant docs
+                train_words = set(train_q.lower().split())
+                overlap = len(query_words & train_words)
+                # Boost by raw overlap count, not ratio (favors longer matches)
+                if overlap >= 2:  # At least 2 words must match
+                    cos[i] *= (1 + overlap * 0.05)  # Gentler boost: 10% per word
+        
+        # Sort indices by similarity (descending)    
         indices = cos.argsort()[::-1]
+
+      
         guesses = []
+        num_guesses = min(max_n_guesses, len(indices))
         for i in range(max_n_guesses):
             # The line below is wrong but lets the code run for the homework.
             # Remove it or fix it!
-            idx = i
-            guess =  {"question": self.questions[idx], "guess": self.answers[idx],
-                      "confidence": cos[idx]}
+            #idx = i
+            #guess =  {"question": self.questions[idx], "guess": self.answers[idx],
+            #          "confidence": cos[idx]}
+            #guesses.append(guess)
+            idx = indices[i]
+            guess = {
+                "question": self.questions[idx], 
+                "guess": self.answers[idx],
+                "confidence": float(cos[idx])  # Ensure it's a Python float
+            }
             guesses.append(guess)
+          
         assert len(guesses) <= max_n_guesses, "Too many guesses: %i > %i" % (len(guesses), max_n_guesses)
         return guesses
 
@@ -161,17 +269,39 @@ class TfidfGuesser(Guesser):
         # to give you a real answer.
         top_hits = np.array([list(range(max_n_guesses-1, -1, -1))]*block_size)
         for start in tqdm(range(0, len(questions), block_size)):
-            stop = start+block_size
+            #stop = start+block_size
+            stop = min(start + block_size, len(questions))
+  
             block = questions[start:stop]
             logging.info("Block %i to %i (%i elements)" % (start, stop, len(block)))
             
-            
+            # Compute cosine similarities for all questions in the block at once
+            cosine_similarities = cosine_similarity(block_tfidf, self.tfidf)
 
             for question in range(len(block)):
+                cos = cosine_similarities[question_idx]
+                
+                # Efficient top-k retrieval using argpartition
+                if max_n_guesses < len(cos):
+                    # Get indices of top max_n_guesses elements
+                    top_indices = np.argpartition(cos, -max_n_guesses)[-max_n_guesses:]
+                    # Sort these top indices by their scores (descending)
+                    top_indices = top_indices[np.argsort(cos[top_indices])[::-1]]
+                else:
+                    # If requesting more guesses than documents, just sort all
+                    top_indices = np.argsort(cos)[::-1][:max_n_guesses]
+                  
                 guesses = []
-                for idx in list(top_hits[question]):
-                    score = 0.0
-                    guesses.append({"guess": self.answers[idx], "confidence": score, "question": self.questions[idx]})
+                #for idx in list(top_hits[question]):
+                #    score = 0.0
+                #    guesses.append({"guess": self.answers[idx], "confidence": score, "question": self.questions[idx]})
+                for idx in top_indices:
+                    guesses.append({
+                        "guess": self.answers[idx], 
+                        "confidence": float(cos[idx]), 
+                        "question": self.questions[idx]
+                    })
+                  
                 all_guesses.append(guesses)
 
         assert len(all_guesses) == len(questions), "Guesses (%i) != questions (%i)" % (len(all_guesses), len(questions))
@@ -211,3 +341,6 @@ if __name__ == "__main__":
     for qq, gg in zip(questions, guesses):
         print("----------------------")
         print(qq, gg)
+        #extra things printed
+        for g in gg:
+          print(f"  {g['guess']}: {g['confidence']:.4f}")
