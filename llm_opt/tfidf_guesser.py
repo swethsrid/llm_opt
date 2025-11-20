@@ -336,7 +336,7 @@ if __name__ == "__main__":
     guesser = load_guesser(flags, load=True)
 
     questions = list(kTFIDF_TEST_QUESTIONS.keys())
-    guesses = guesser.batch_guess(questions, 3, 2)
+    guesses = guesser.batch_guess(questions, 3, 1024)
 
     for qq, gg in zip(questions, guesses):
         print("----------------------")
