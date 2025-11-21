@@ -267,14 +267,14 @@ class TfidfGuesser(Guesser):
 
         # The next line of code is bogus, this needs to be fixed
         # to give you a real answer.
-        top_hits = np.array([list(range(max_n_guesses-1, -1, -1))]*block_size)
         for start in tqdm(range(0, len(questions), block_size)):
             #stop = start+block_size
             stop = min(start + block_size, len(questions))
   
             block = questions[start:stop]
             logging.info("Block %i to %i (%i elements)" % (start, stop, len(block)))
-            
+            block_tfidf = self.tfidf_vectorizer.transform(block)
+
             # Compute cosine similarities for all questions in the block at once
             cosine_similarities = cosine_similarity(block_tfidf, self.tfidf)
 
