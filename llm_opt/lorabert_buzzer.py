@@ -66,6 +66,11 @@ class LoRALayer(torch.nn.Module):
         self.out_dim = out_dim
 
         # Complete the initialization of the two weight matrices
+        #mat a has dim input x rank <- parameters given to us
+        #mat b has dim rank x output
+        self.A = torch.nn.Parameter(torch.randn(in_dim, rank))
+        self.B = torch.nn.Parameter(torch.zeros(rank, out_dim))
+        
         self.alpha = alpha
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -82,7 +87,9 @@ class LoRALayer(torch.nn.Module):
             output_dimension = torch.Size((x.shape[0], self.out_dim))
 
         # Compute the low-rank delta
-
+        # delta = (x @ A) @ B * (alpha / rank)
+        delta = (x @ self.A @ self.B) * (self.alpha / self.rank)
+        
         return delta
 
 
