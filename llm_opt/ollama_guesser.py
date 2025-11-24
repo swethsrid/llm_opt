@@ -218,6 +218,10 @@ if __name__ == "__main__":
     guesser_params["ollama"].load_command_line_params(flags)
 
     questions = load_questions(flags)
+
+    lm = dspy.LM("ollama_chat/gemma3:4b", api_base="http://localhost:11434", api_key="")
+    dspy.configure(lm=lm)
+
     od = instantiate_guesser("Ollama", flags, False)
 
     # First, let's show some examples
