@@ -279,7 +279,7 @@ class TfidfGuesser(Guesser):
             cosine_similarities = cosine_similarity(block_tfidf, self.tfidf)
 
             for question in range(len(block)):
-                cos = cosine_similarities[question_idx]
+                cos = cosine_similarities[question]
                 
                 # Efficient top-k retrieval using argpartition
                 if max_n_guesses < len(cos):
