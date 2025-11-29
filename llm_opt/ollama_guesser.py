@@ -89,7 +89,11 @@ class CalibratedRAG(dspy.Module):
         query = self.query_generator(question=question).query
         context = ""
         for retriever in self.retrievers:
-            results = self.retrievers[retriever](query, self._topk)
+            #results = self.retrievers[retriever](query, self._topk)
+            # Use batch_guess with a single query
+            batch_results = self.retrievers[retriever_name].batch_guess([query], self._topk)
+            # Extract the results for our single query (first element)
+            results = batch_results[0]
             for result in results:
                 context += "%s: %s: %s\n" % (result["guess"], retriever, result["question"])
             
@@ -168,6 +172,37 @@ class OllamaDspy(Guesser):
             trainset=dataset,
         )
 
+    def batch_call(self, questions, max_n_guesses=1):
+        assert max_n_guesses == 1, "Can only give one guess"
+        
+        model = self._optimized if self._optimized is not None else self._model
+        
+        # Generate queries for all questions
+        queries = [model.query_generator(question=q).query for q in questions]
+        
+        all_contexts = [[] for _ in range(len(questions))]
+        
+        for name, retriever in model.retrievers.items():
+            batch_results = retriever.batch_guess(queries, model._topk)
+            
+            for idx, results in enumerate(batch_results):
+                for result in results:
+                    all_contexts[idx].append("%s: %s: %s" % (result["guess"], name, result["question"]))
+        
+        # answers for all questions
+        predictions = []
+        for question, query, context_parts in zip(questions, queries, all_contexts):
+            context = "\n".join(context_parts)
+            guess = model.guess_generator(question=question, context=context)
+            confidence = model.confidence_generator(question=question, query=query, context=context, guess=guess)
+            predictions.append({
+                "guess": guess.answer, 
+                "confidence": confidence.confidence, 
+                "evidence": context
+            })
+        
+        return predictions
+    
     def __call__(self, question, max_n_guesses=1):
         if self._optimized == None:
             model = self._model
@@ -218,10 +253,6 @@ if __name__ == "__main__":
     guesser_params["ollama"].load_command_line_params(flags)
 
     questions = load_questions(flags)
-
-    lm = dspy.LM("ollama_chat/gemma3:4b", api_base="http://localhost:11434", api_key="")
-    dspy.configure(lm=lm)
-
     od = instantiate_guesser("Ollama", flags, False)
 
     # First, let's show some examples
